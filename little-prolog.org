@@ -1,0 +1,280 @@
+#+TITLE:  little prolog
+#+AUTHOR: 謝宇恆 / XIE Yuheng
+#+PROPERTY: tangle little-prolog.rkt
+
+* note
+
+* helper
+
+*** header
+
+    #+begin_src scheme
+    #lang racket
+    (require rnrs/bytevectors-6)
+    (require test-engine/racket-tests)
+    (require racket/list)
+    (require (for-syntax syntax/parse))
+    (require racket/fixnum)
+    #+end_src
+
+*** macro
+
+***** cat & orz
+
+      #+begin_src scheme
+      (define-syntax cat
+        (syntax-rules ()
+          [(cat (str . args))
+           (format str . args)]
+          [(cat (str . args) (str2 . args2) ...)
+           (string-append
+            (cat (str . args))
+            (cat (str2 . args2) ...))]))
+
+      (define-syntax orz
+        (syntax-rules ()
+          [(orz . body)
+           (error (cat . body))]))
+      #+end_src
+
+***** fun
+
+      #+begin_src scheme
+      (define-syntax fun
+        (lambda (stx)
+          (syntax-parse stx
+            #:literals (->)
+            [(fun [v ... -> r ...] ...)
+             (syntax
+              (match-lambda** [(v ...) (begin r ...)] ...))])))
+
+      (check-expect
+          ((fun
+             [1 x -> x x]
+             [_ _ -> 'fun 'fun])
+           1 2)
+          2)
+
+      (define-syntax just-fun
+        (syntax-rules ()
+          [(just-fun argument-list . body)
+           ((fun . body) . argument-list)]))
+
+      (check-expect
+          (just-fun [1 2]
+            [1 x -> x x])
+          2)
+      #+end_src
+
+***** the note for color
+
+      #+begin_src scheme
+      (define-syntax note
+        (syntax-rules ()
+          [(note . body)
+           (void)]))
+      #+end_src
+
+*** file
+
+***** file->string
+
+      #+begin_src scheme
+      (define file->string
+        (lambda (file)
+          (call-with-input-file file
+            (lambda (file-port)
+              (read-string (file-size file) file-port)))))
+      #+end_src
+
+*** try & fail
+
+    #+begin_src scheme
+    (define-syntax try
+      (syntax-rules (try:help)
+        [(try body key function)
+         (with-handlers
+             ([(lambda (exception)
+                 (equal? (list '<exception> 'key) exception))
+               (lambda (exception)
+                 function)])
+           body)]))
+
+    (define-syntax back-to-last-try
+      (syntax-rules ()
+        [(back-to-last-try key
+           e ...)
+         (begin
+           e ...
+           (raise (list '<exception> 'key)))]))
+    #+end_src
+
+* predicate-table
+
+*** note
+
+    - predicate:
+      in predicate-table
+      use predicate-head as key
+      to find predicate-body
+
+    - predicate-head:
+      [module-name predicate-name arity]
+
+    - predicate-body:
+      [sequent ...]
+
+    - sequent:
+      [succedent antecedent]
+
+    - succedent:
+      [predication ...]
+      - always one element
+      - predicate of the predication
+        is always the predicate used to find this body
+
+    - antecedent:
+      [predication ...]
+
+    - predication:
+      [predicate-head [argument ...]]
+
+    - note that
+      predication as
+      [predicate-head [argument ...]]
+      is different from
+      predicate as
+      [predicate-head predicate-body]
+
+*** predicate-table
+
+    #+begin_src scheme
+    (define predicate-table (make-hash))
+    #+end_src
+
+* parser
+
+*** prolog
+
+    #+begin_src scheme
+    (define-syntax prolog
+      (syntax-rules ()
+        [(prolog . body)
+         (prolog-help (quote body))]))
+
+    (define prolog-help
+      (lambda (body)
+        body))
+    #+end_src
+
+*** note
+
+    #+begin_src scheme
+    (note:
+      (source:
+        (append () :list2 :list2)
+        (append (cons :head1 :tail1) :list2 (cons :head1 :tail2) <-
+                (append :tail1 :list2 :tail2)))
+      (predicate:
+        (predicate-head: append)
+        (sequent:
+          (succedent:
+            (predication:
+              (predicate-head: append)
+              (argument-vector:
+                (cons :head1 :tail1)
+                :list2
+                (cons :head1 :tail2))))
+          (antecedent:
+            (predication:
+              (predicate-head: append)
+              (argument-vector:
+                :tail1
+                :list2
+                :tail2))))))
+
+    (note:
+      (source:
+        (g a))
+      (predicate:
+        (predicate-head: g)
+        (sequent:
+          (succedent:
+            (predication:
+              (predicate-head: g)
+              (argument-vector:
+                a)))
+          (antecedent:
+            nil))))
+
+    (note:
+      (source:
+        (h :x <-
+           (f :x)
+           (g :x)))
+      (predicate:
+        (predicate-head: h)
+        (sequent:
+          (succedent:
+            (predication:
+              (predicate-head: h)
+              (argument-vector:
+                :x)))
+          (antecedent:
+            (predication:
+              (predicate-head: f)
+              (argument-vector:
+                :x))
+            (predication:
+              (predicate-head: g)
+              (argument-vector:
+                :x))))))
+
+    (note:
+      這裏的 predication 是純粹靜態的 [純粹語法的]
+      計算的時候 goal-stack 的一個 and-list 中
+      所保存的不是這種 predication
+      而需要把其中的 variable-mark [比如 :mark]
+      變成 variable-stack 中的地址)
+    #+end_src
+
+* compiler
+
+*** compile-predicate
+
+    #+begin_src scheme
+    (define compile-predicate
+      (lambda (module-name import-list body)
+        ))
+    (note:
+      (predicate:
+        (name: append)
+        (succedent:
+          (predication:
+            (append (cons :head1 :tail1)
+                    :list2
+                    (cons :head1 :tail2))))
+        (antecedent:
+          (predication:
+            (append :tail1
+                    :list2
+                    :tail2)))))
+    #+end_src
+
+* goal-stack
+
+  #+begin_src scheme
+  (define goal-stack-size 1024)
+  (define goal-stack (make-vector goal-stack-size))
+  (define goal-stack-pointer 0)
+  #+end_src
+
+* variable-stack
+
+  - all variables are local
+
+  #+begin_src scheme
+  (define variable-stack-size (* 1024 8))
+  (define variable-stack (make-vector variable-stack-size))
+  (define variable-stack-pointer 0)
+  #+end_src
