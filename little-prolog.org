@@ -109,48 +109,68 @@
            (raise (list '<exception> 'key)))]))
     #+end_src
 
-* predicate-table
+* note structure
 
-*** note
+  - predicate:
+    in name-table
+    use predicate-head as key
+    to find predicate-body
 
-    - predicate:
-      in predicate-table
-      use predicate-head as key
-      to find predicate-body
+  - predicate-head:
+    [predicate-name arity]
+    ><><><
+    no module system for now
 
-    - predicate-head:
-      [module-name predicate-name arity]
+  - predicate-body:
+    [sequent ...]
 
-    - predicate-body:
-      [sequent ...]
+  - sequent:
+    [succedent antecedent]
 
-    - sequent:
-      [succedent antecedent]
+  - succedent:
+    [predicate-formal-term ...]
+    - always one element
+    - predicate of the predicate-formal-term
+      is always the predicate used to find this body
 
-    - succedent:
-      [predication ...]
-      - always one element
-      - predicate of the predication
-        is always the predicate used to find this body
+  - antecedent:
+    [predicate-formal-term ...]
 
-    - antecedent:
-      [predication ...]
+  - predicate-formal-term:
+    [predicate-head [argument ...]]
 
-    - predication:
-      [predicate-head [argument ...]]
+  - note that
+    predicate-formal-term as
+    [predicate-head [argument ...]]
+    is different from
+    predicate as
+    [predicate-head predicate-body]
 
-    - note that
-      predication as
-      [predicate-head [argument ...]]
-      is different from
-      predicate as
-      [predicate-head predicate-body]
+  - note that
+    predicate-formal-term stores formal-variable
+    like :formal-variable
+    predicate-term stores actual variable
+    which contains address in variable-stack
 
-*** predicate-table
+* name-table
 
-    #+begin_src scheme
-    (define predicate-table (make-hash))
-    #+end_src
+  #+begin_src scheme
+  (define name-table (make-hash))
+  (define name-table-get
+    (lambda (name)
+      (hash-ref name-table name 'unnamed)))
+  (define name-table-set
+    (lambda (name value)
+      (hash-set! name-table name value)))
+  (define name-table-print
+    (lambda ()
+      (hash-map
+       name-table
+       (lambda (name value)
+         (display
+          (cat ("- ~a\n~a\n" name value)))))
+      (void)))
+  #+end_src
 
 * parser
 
@@ -164,78 +184,129 @@
 
     (define prolog-help
       (lambda (body)
-        body))
+        (map compile-predicate
+             (map exp->syntax-tree body))))
     #+end_src
 
-*** note
+*** note use global stack to handle module and import
+
+    - module is about name expansion for predicate definition
+
+    - import is about name expansion for predicate body
+
+    - exp->syntax-tree use the tos
+
+*** exp->predicate-formal-term
 
     #+begin_src scheme
-    (note:
-      (source:
-        (append () :list2 :list2)
-        (append (cons :head1 :tail1) :list2 (cons :head1 :tail2) <-
+    (define exp->predicate-formal-term
+      (lambda (exp)
+        `(predicate-formal-term:
+           (predicate-head:
+             ,(vector (car exp)
+                      (length (cdr exp))))
+           (argument-vector:
+             ,(list->vector (cdr exp))))))
+
+    (note
+      (exp->predicate-formal-term
+       '(append (cons :head1 :tail1)
+                :list2
+                (cons :head1 :tail2)))
+      '(predicate-formal-term:
+         (predicate-head: #(append 3))
+         (argument-vector:
+           #((cons :head1 :tail1)
+             :list2
+             (cons :head1 :tail2)))))
+    #+end_src
+
+*** exp->syntax-tree
+
+    #+begin_src scheme
+    (define exp->syntax-tree
+      (lambda (exp)
+        (define exp-list:antecedent
+          (just-fun [(member '<- exp)]
+            [`(<- . ,tail) -> tail]
+            [#f -> '()]))
+        (define exp:succedent
+          (just-fun [(member '<- exp)]
+            [#f -> exp]
+            [rest-exp
+             -> (take exp (- (length exp)
+                             (length rest-exp)))]))
+        `(predicate:
+           (predicate-head:
+             ,(vector (car exp:succedent)
+                      (length (cdr exp:succedent))))
+           (sequent:
+             (succedent:
+               ,(vector
+                 (exp->predicate-formal-term exp:succedent)))
+             (antecedent:
+               ,(list->vector
+                 (map exp->predicate-formal-term
+                      exp-list:antecedent)))))))
+
+    (check-expect
+      (exp->syntax-tree
+       '(append (cons :head1 :tail1) :list2 (cons :head1 :tail2) <-
                 (append :tail1 :list2 :tail2)))
-      (predicate:
-        (predicate-head: append)
-        (sequent:
-          (succedent:
-            (predication:
-              (predicate-head: append)
-              (argument-vector:
-                (cons :head1 :tail1)
-                :list2
-                (cons :head1 :tail2))))
-          (antecedent:
-            (predication:
-              (predicate-head: append)
-              (argument-vector:
-                :tail1
-                :list2
-                :tail2))))))
+      '(predicate:
+         (predicate-head: #(append 3))
+         (sequent:
+           (succedent:
+             #((predicate-formal-term:
+                 (predicate-head: #(append 3))
+                 (argument-vector:
+                   #((cons :head1 :tail1)
+                     :list2
+                     (cons :head1 :tail2))))))
+           (antecedent:
+             #((predicate-formal-term:
+                 (predicate-head: #(append 3))
+                 (argument-vector:
+                   #(:tail1
+                     :list2
+                     :tail2))))))))
 
-    (note:
-      (source:
-        (g a))
-      (predicate:
-        (predicate-head: g)
-        (sequent:
-          (succedent:
-            (predication:
-              (predicate-head: g)
-              (argument-vector:
-                a)))
-          (antecedent:
-            nil))))
-
-    (note:
-      (source:
-        (h :x <-
+    (check-expect
+      (exp->syntax-tree
+       '(h :x <-
            (f :x)
            (g :x)))
-      (predicate:
-        (predicate-head: h)
-        (sequent:
-          (succedent:
-            (predication:
-              (predicate-head: h)
-              (argument-vector:
-                :x)))
-          (antecedent:
-            (predication:
-              (predicate-head: f)
-              (argument-vector:
-                :x))
-            (predication:
-              (predicate-head: g)
-              (argument-vector:
-                :x))))))
+      '(predicate:
+         (predicate-head: #(h 1))
+         (sequent:
+           (succedent:
+             #((predicate-formal-term:
+                 (predicate-head: #(h 1))
+                 (argument-vector:
+                   #(:x)))))
+           (antecedent:
+             #((predicate-formal-term:
+                 (predicate-head: #(f 1))
+                 (argument-vector:
+                   #(:x)))
+               (predicate-formal-term:
+                 (predicate-head: #(g 1))
+                 (argument-vector:
+                   #(:x))))))))
 
-    (note:
-      這裏的 predication 是純粹靜態的 [純粹語法的]
-      計算的時候 goal-stack 的一個 and-list 中
-      所保存的不是這種 predication
-      而需要把其中的 variable-mark [比如 :mark]
-      變成 variable-stack 中的地址)
+    (check-expect
+      (exp->syntax-tree
+       '(g a))
+      '(predicate:
+         (predicate-head: #(g 1))
+         (sequent:
+           (succedent:
+             #((predicate-formal-term:
+                 (predicate-head: #(g 1))
+                 (argument-vector:
+                   #(a)))))
+           (antecedent:
+             #()))))
     #+end_src
 
 * compiler
@@ -244,21 +315,28 @@
 
     #+begin_src scheme
     (define compile-predicate
-      (lambda (module-name import-list body)
-        ))
-    (note:
-      (predicate:
-        (name: append)
-        (succedent:
-          (predication:
-            (append (cons :head1 :tail1)
-                    :list2
-                    (cons :head1 :tail2))))
-        (antecedent:
-          (predication:
-            (append :tail1
-                    :list2
-                    :tail2)))))
+      (lambda (syntax-tree)
+        (just-fun [syntax-tree]
+          [`(predicate:
+              (predicate-head: ,predicate-head)
+              ,sequent)
+           -> (just-fun [(name-table-get predicate-head)]
+                ['unnamed
+                 -> (name-table-set
+                     predicate-head
+                     `(<sequent-vector>
+                       ,(vector sequent)))]
+                [`(<sequent-vector> ,sequent-vector)
+                 -> (name-table-set
+                     predicate-head
+                     `(<sequent-vector>
+                       ,(vector-append
+                         sequent-vector
+                         (vector sequent))))])]
+          [else
+           -> (orz ("- compile-predicate\n")
+                   ("  can not compile syntax-tree:\n~a\n"
+                    syntax-tree))])))
     #+end_src
 
 * goal-stack
@@ -278,3 +356,41 @@
   (define variable-stack (make-vector variable-stack-size))
   (define variable-stack-pointer 0)
   #+end_src
+
+* play
+
+*** main & test
+
+    #+begin_src scheme
+    (module+ main
+      (void))
+
+    (module+ test
+      (display
+       (cat ("\n")
+            ("- testing little-prolog o.o\n")
+            ("\n")))
+      (test))
+    #+end_src
+
+*** in host
+
+    #+begin_src scheme :tangle no
+    (require "little-prolog.rkt")
+
+    (prolog
+
+     (append () :list2 :list2)
+     (append (cons :head1 :tail1) :list2 (cons :head1 :tail2) <-
+             (append :tail1 :list2 :tail2))
+
+     (g a)
+
+     (h :x <-
+        (f :x)
+        (g :x)))
+
+    (name-table-get #[append 3])
+    (name-table-get #[h 1])
+    (name-table-get #[g 1])
+    #+end_src
