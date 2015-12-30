@@ -2,8 +2,6 @@
 #+AUTHOR: 謝宇恆 / XIE Yuheng
 #+PROPERTY: tangle little-prolog.rkt
 
-* note
-
 * helper
 
 *** header
@@ -109,7 +107,7 @@
            (raise (list '<exception> 'key)))]))
     #+end_src
 
-* note structure
+* note predicate
 
   - predicate:
     in name-table
@@ -128,31 +126,41 @@
     [succedent antecedent]
 
   - succedent:
-    [predicate-formal-term ...]
+    [formal-predicate-term ...]
     - always one element
-    - predicate of the predicate-formal-term
+    - predicate of the formal-predicate-term
       is always the predicate used to find this body
+    - note that
+      I am viewing 'always-special' succedent
+      as general succedent
+      it is a un-optimization
 
   - antecedent:
-    [predicate-formal-term ...]
+    [formal-predicate-term ...]
 
-  - predicate-formal-term:
+  - formal-predicate-term:
     [predicate-head [argument ...]]
 
   - note that
-    predicate-formal-term as
+    formal-predicate-term as
     [predicate-head [argument ...]]
     is different from
     predicate as
     [predicate-head predicate-body]
 
   - note that
-    predicate-formal-term stores formal-variable
+    formal-predicate-term stores formal-variable
     like :formal-variable
     predicate-term stores actual variable
     which contains address in variable-stack
 
 * name-table
+
+  - note that
+    this name-table is for predicate only
+    no type-tag in each entry of the table
+    thus
+    predicate has is own namespace
 
   #+begin_src scheme
   (define name-table (make-hash))
@@ -162,7 +170,7 @@
   (define name-table-set
     (lambda (name value)
       (hash-set! name-table name value)))
-  (define name-table-print
+  (define name-table-report
     (lambda ()
       (hash-map
        name-table
@@ -174,18 +182,14 @@
 
 * parser
 
-*** prolog
+*** define-knowledge
 
     #+begin_src scheme
-    (define-syntax prolog
+    (define-syntax define-knowledge
       (syntax-rules ()
-        [(prolog . body)
-         (prolog-help (quote body))]))
-
-    (define prolog-help
-      (lambda (body)
-        (map compile-predicate
-             (map exp->syntax-tree body))))
+        [(define-knowledge . body)
+         (map compile-predicate
+              (map exp->predicate (quote body)))]))
     #+end_src
 
 *** note use global stack to handle module and import
@@ -194,14 +198,14 @@
 
     - import is about name expansion for predicate body
 
-    - exp->syntax-tree use the tos
+    - exp->predicate use the tos
 
-*** exp->predicate-formal-term
+*** exp->formal-predicate-term
 
     #+begin_src scheme
-    (define exp->predicate-formal-term
+    (define exp->formal-predicate-term
       (lambda (exp)
-        `(predicate-formal-term:
+        `(formal-predicate-term:
            (predicate-head:
              ,(vector (car exp)
                       (length (cdr exp))))
@@ -209,11 +213,11 @@
              ,(list->vector (cdr exp))))))
 
     (note
-      (exp->predicate-formal-term
+      (exp->formal-predicate-term
        '(append (cons :head1 :tail1)
                 :list2
                 (cons :head1 :tail2)))
-      '(predicate-formal-term:
+      '(formal-predicate-term:
          (predicate-head: #(append 3))
          (argument-vector:
            #((cons :head1 :tail1)
@@ -221,10 +225,10 @@
              (cons :head1 :tail2)))))
     #+end_src
 
-*** exp->syntax-tree
+*** exp->predicate
 
     #+begin_src scheme
-    (define exp->syntax-tree
+    (define exp->predicate
       (lambda (exp)
         (define exp-list:antecedent
           (just-fun [(member '<- exp)]
@@ -243,28 +247,28 @@
            (sequent:
              (succedent:
                ,(vector
-                 (exp->predicate-formal-term exp:succedent)))
+                 (exp->formal-predicate-term exp:succedent)))
              (antecedent:
                ,(list->vector
-                 (map exp->predicate-formal-term
+                 (map exp->formal-predicate-term
                       exp-list:antecedent)))))))
 
     (check-expect
-      (exp->syntax-tree
+      (exp->predicate
        '(append (cons :head1 :tail1) :list2 (cons :head1 :tail2) <-
                 (append :tail1 :list2 :tail2)))
       '(predicate:
          (predicate-head: #(append 3))
          (sequent:
            (succedent:
-             #((predicate-formal-term:
+             #((formal-predicate-term:
                  (predicate-head: #(append 3))
                  (argument-vector:
                    #((cons :head1 :tail1)
                      :list2
                      (cons :head1 :tail2))))))
            (antecedent:
-             #((predicate-formal-term:
+             #((formal-predicate-term:
                  (predicate-head: #(append 3))
                  (argument-vector:
                    #(:tail1
@@ -272,7 +276,7 @@
                      :tail2))))))))
 
     (check-expect
-      (exp->syntax-tree
+      (exp->predicate
        '(h :x <-
            (f :x)
            (g :x)))
@@ -280,28 +284,28 @@
          (predicate-head: #(h 1))
          (sequent:
            (succedent:
-             #((predicate-formal-term:
+             #((formal-predicate-term:
                  (predicate-head: #(h 1))
                  (argument-vector:
                    #(:x)))))
            (antecedent:
-             #((predicate-formal-term:
+             #((formal-predicate-term:
                  (predicate-head: #(f 1))
                  (argument-vector:
                    #(:x)))
-               (predicate-formal-term:
+               (formal-predicate-term:
                  (predicate-head: #(g 1))
                  (argument-vector:
                    #(:x))))))))
 
     (check-expect
-      (exp->syntax-tree
+      (exp->predicate
        '(g a))
       '(predicate:
          (predicate-head: #(g 1))
          (sequent:
            (succedent:
-             #((predicate-formal-term:
+             #((formal-predicate-term:
                  (predicate-head: #(g 1))
                  (argument-vector:
                    #(a)))))
@@ -324,38 +328,267 @@
                 ['unnamed
                  -> (name-table-set
                      predicate-head
-                     `(<sequent-vector>
-                       ,(vector sequent)))]
-                [`(<sequent-vector> ,sequent-vector)
+                     (vector sequent))]
+                [(? vector? sequent-vector)
                  -> (name-table-set
                      predicate-head
-                     `(<sequent-vector>
-                       ,(vector-append
-                         sequent-vector
-                         (vector sequent))))])]
+                     (vector-append sequent-vector
+                                    (vector sequent)))]
+                [else -> (orz ("- compile-predicate\n")
+                              ("  name-table-get else:\n")
+                              ("  ~a\n" else))])]
           [else
            -> (orz ("- compile-predicate\n")
                    ("  can not compile syntax-tree:\n~a\n"
                     syntax-tree))])))
     #+end_src
 
+* variable-area
+
+*** note
+
+    - all variables are local
+
+    - a variable is an address in variable-area
+
+    - variable-area is a round-buffer for now
+      actually need a GC
+
+    - variable
+      [name determinacy value]
+      I use
+      [name predicate-head determinacy value]
+      for report
+
+*** variable-area
+
+    #+begin_src scheme
+    (define variable-area-size (* 1024 8))
+    (define variable-area (make-vector variable-area-size))
+    (define variable-area-pointer 0)
+
+    (define variable-area-set
+      (lambda (address value)
+        (vector-set! variable-area address value)))
+
+    (define variable-area-get
+      (lambda (address)
+        (vector-ref variable-area address)))
+
+    (define variable-new-address
+      (lambda ()
+        (if (< variable-area-pointer variable-area-size)
+          (let ([return-value variable-area-pointer])
+            (set! variable-area-pointer
+                  (+ variable-area-pointer 1))
+            return-value)
+          ;; round-buffer
+          (let ([return-value 0])
+            (set! variable-area-pointer 1)
+            return-value))))
+
+    (define variable-area-report
+      (lambda ()
+        (define loop
+          (lambda (cursor)
+            (when (< cursor variable-area-pointer)
+              (just-fun [(variable-area-get cursor)]
+                [(vector name predicate-head determinacy value)
+                 -> (display
+                     (cat ("~a :~a ~a\n" cursor predicate-head name)
+                          ("  ~a\n"
+                           (if (equal? determinacy 0)
+                             "<unbound>"
+                             value))))])
+              (loop (+ 1 cursor)))))
+        (loop 0)))
+    #+end_src
+
+* note and & or
+
+  - and-vector
+    is vector of formal-predicate-term
+    or vector of predicate-term
+
+  - or-vector
+    is vector of sequent
+
 * goal-stack
 
-  #+begin_src scheme
-  (define goal-stack-size 1024)
-  (define goal-stack (make-vector goal-stack-size))
-  (define goal-stack-pointer 0)
-  #+end_src
+*** note goal
 
-* variable-stack
+    - goal:
+      [and-cursor
+       [predicate-term ...]
+       [and-meta ...]]
 
-  - all variables are local
+    - and-meta:
+      [or-cursor
+       undo-record
+       [sequent ...]]
 
-  #+begin_src scheme
-  (define variable-stack-size (* 1024 8))
-  (define variable-stack (make-vector variable-stack-size))
-  (define variable-stack-pointer 0)
-  #+end_src
+*** goal-stack
+
+    #+begin_src scheme
+    (define goal-stack-size 1024)
+    (define goal-stack (make-vector goal-stack-size))
+    (define goal-stack-pointer 0)
+
+    (define goal-stack-push
+      (lambda (goal)
+        (vector-set! goal-stack goal-stack-pointer goal)
+        (set! goal-stack-pointer (+ goal-stack-pointer 1))))
+
+    (define goal-stack-pop
+      (lambda ()
+        (set! goal-stack-pointer (- goal-stack-pointer 1))
+        (vector-ref goal-stack goal-stack-pointer)))
+    #+end_src
+
+*** formal-and-vector->and-vector
+
+    - as vector:formal-predicate-term->vector:predicate-term
+
+    #+begin_src scheme
+    (define formal-and-vector->and-vector
+      (lambda (formal-and-vector)
+        (define variable-record (make-hash))
+        (define variable-record-get
+          (lambda (name)
+            (hash-ref variable-record name 'unnamed)))
+        (define variable-record-set
+          (lambda (name value)
+            (hash-set! variable-record name value)))
+        (define formal-variable?
+          (lambda (x)
+            (and (symbol? x)
+                 (let* ([str (symbol->string x)]
+                        [len (string-length str)])
+                   (and (equal? ":" (substring str 0 1))
+                        (not
+                         (equal? ":" (substring str (- len 1)))))))))
+        (define formal-predicate-term->predicate-term
+          (lambda (formal-predicate-term)
+            (define current-predicate-head
+              (just-fun [formal-predicate-term]
+                [`(formal-predicate-term:
+                    (predicate-head:
+                      ,predicate-head)
+                    (argument-vector:
+                      ,argument-vector))
+                 -> predicate-head]
+                [else
+                 -> (orz ("- formal-predicate-term->predicate-term\n")
+                         ("  current-predicate-head"))]))
+            (define formal-term->term
+              (fun
+                [(cons head tail)
+                 -> (cons (formal-term->term head)
+                          (formal-term->term tail))]
+                [(? formal-variable? formal-variable)
+                 -> `(<variable>
+                      ,(just-fun [(variable-record-get formal-variable)]
+                         ['unnamed
+                          -> (let ([address (variable-new-address)])
+                               (variable-record-set formal-variable address)
+                               (variable-area-set address
+                                                  (vector formal-variable
+                                                          current-predicate-head
+                                                          0 ;; determinacy
+                                                          0))
+                               address)]
+                         [address -> address]))]
+                [else -> else]))
+            (just-fun [formal-predicate-term]
+              [`(formal-predicate-term:
+                  (predicate-head:
+                    ,predicate-head)
+                  (argument-vector:
+                    ,argument-vector))
+               -> `(predicate-term:
+                     (predicate-head:
+                       ,predicate-head)
+                     (argument-vector:
+                       ,(vector-map formal-term->term
+                          argument-vector)))]
+              [else
+               -> (orz ("- formal-predicate-term->predicate-term"))])))
+        (vector-map formal-predicate-term->predicate-term
+          formal-and-vector)))
+
+    (note
+      (formal-and-vector->and-vector
+       #((formal-predicate-term:
+           (predicate-head: #(append 3))
+           (argument-vector:
+             #((cons :head1 :tail1)
+               :list2
+               (cons :head1 :tail2))))))
+      #((predicate-term:
+          (predicate-head: #(append 3))
+          (argument-vector:
+            #((cons (<variable> 0) (<variable> 1))
+              (<variable> 2)
+              (cons (<variable> 0) (<variable> 3)))))))
+    #+end_src
+
+*** and-vector->and-meta-vector
+
+    #+begin_src scheme
+    (define and-vector->and-meta-vector
+      (lambda (and-vector)
+        (vector-map
+            (fun
+              [`(predicate-term:
+                  (predicate-head: ,predicate-head)
+                  (argument-vector: ,argument-vector))
+               -> (vector
+                   0 ;; or-cursor
+                   null ;; undo-record
+                   (just-fun [(name-table-get predicate-head)]
+                     ['unnamed
+                      -> (orz ("- and-vector->and-meta-vector\n")
+                              ("  name-table-get unnamed:\n")
+                              ("  ~a\n" predicate-head))]
+                     [(? vector? sequent-vector)
+                      -> sequent-vector]
+                     [else -> (orz ("- and-vector->and-meta-vector\n")
+                                   ("  name-table-get else:\n")
+                                   ("  ~a\n" else))]))]
+              [else
+               -> (orz ("- and-vector->and-meta-vector\n")
+                       ("  not predicate-term:\n")
+                       ("  ~a\n" else))])
+          and-vector)))
+    #+end_src
+
+*** goal-stack-interpreter
+
+    #+begin_src scheme
+    (define goal-stack-interpreter
+      (lambda ()
+        `()))
+    #+end_src
+
+*** query
+
+    #+begin_src scheme
+    (define-syntax query
+      (syntax-rules ()
+        [(query . body)
+         (let ([and-vector
+                (formal-and-vector->and-vector
+                 (list->vector
+                  (map exp->formal-predicate-term (quote body))))])
+           (goal-stack-push
+            (vector
+             0 ;; and-cursor
+             and-vector
+             (and-vector->and-meta-vector and-vector)))
+
+           ;; (goal-stack-interpreter)
+           )]))
+    #+end_src
 
 * play
 
@@ -378,7 +611,7 @@
     #+begin_src scheme :tangle no
     (require "little-prolog.rkt")
 
-    (prolog
+    (define-knowledge
 
      (append () :list2 :list2)
      (append (cons :head1 :tail1) :list2 (cons :head1 :tail2) <-
@@ -393,4 +626,8 @@
     (name-table-get #[append 3])
     (name-table-get #[h 1])
     (name-table-get #[g 1])
+
+    (query (g :a) (g :a))
+    (variable-area-report)
+    (goal-stack-pop)
     #+end_src
